@@ -1,0 +1,348 @@
+<launch>
+  <!-- Four arm CAN interfaces. A fifth CAN (for example, the mobile base) is
+       intentionally outside this launch. -->
+  <arg name="master_left_can" default="can_l_leader" />
+  <arg name="master_right_can" default="can_r_leader" />
+  <arg name="puppet_left_can" default="can_l_follower" />
+  <arg name="puppet_right_can" default="can_r_follower" />
+  <arg name="auto_enable" default="true" />
+  <!-- When true, one explicit /enable_flag true plus fresh policy/feedback
+       replaces the initial I key. T and I-to-resume remain available. -->
+  <arg name="auto_start_inference" default="false" />
+  <arg name="auto_start_collect" default="false" />
+  <arg name="session_profile" default="supervised" />
+
+  <arg name="publish_hz" default="100.0" />
+  <arg name="input_timeout_s" default="0.15" />
+  <arg name="policy_input_timeout_s" default="1.0" />
+  <arg name="max_joint_velocity_rad_s" default="1.5" />
+  <arg name="max_gripper_velocity_m_s" default="0.15" />
+  <!-- Leaders have to accelerate from rest to the follower pose when
+       inference starts. Keep this independent from mux/takeover limits. -->
+  <arg name="leader_max_joint_velocity_rad_s" default="0.4" />
+  <arg name="leader_max_gripper_velocity_m_s" default="0.15" />
+  <arg name="leader_max_joint_acceleration_rad_s2" default="0.8" />
+  <arg name="leader_max_gripper_acceleration_m_s2" default="0.3" />
+  <!-- Initial i-mode alignment is deliberately gentler than normal policy
+       tracking to avoid overcurrent/stall protection on a loaded leader. -->
+  <arg name="leader_alignment_max_joint_velocity_rad_s" default="0.12" />
+  <arg name="leader_alignment_max_gripper_velocity_m_s" default="0.03" />
+  <arg name="leader_alignment_max_joint_acceleration_rad_s2" default="0.20" />
+  <arg name="leader_alignment_max_gripper_acceleration_m_s2" default="0.10" />
+  <!-- Do not energize supervised leaders to correct a large startup pose
+       mismatch. Pre-align through the fixed-MASTER collection profile. -->
+  <arg name="supervised_start_joint_tolerance_rad" default="0.08" />
+  <arg name="supervised_start_gripper_tolerance_m" default="0.015" />
+  <arg name="enforce_position_limits" default="false" />
+  <arg name="log_joint_commands" default="false" />
+  <arg name="log_joint_commands_period_s" default="1.0" />
+  <!-- Skip optional SDK startup metadata queries. Feedback, arm enable and
+       motion commands remain available. -->
+  <arg name="sdk_piper_init" default="false" />
+  <arg name="enable_timeout_s" default="5.0" />
+  <arg name="enable_retry_period_s" default="0.1" />
+  <arg name="follower_feedback_seed_timeout_s" default="2.0" />
+  <arg name="leader_role_timeout_s" default="5.0" />
+  <!-- S-V1.8-8 can release the gripper before the joint MASTER stream starts.
+       Give the official minimal 0xFA path enough time to finish before using
+       the protocol standby fallback. -->
+  <arg name="leader_master_first_no_stream_retry_s" default="4.0" />
+  <arg name="leader_master_standby_activation" default="true" />
+  <!-- Diagnostic-only fallback. Latest bus traces proved 0x191 was echoed but
+       did not activate MASTER, so keep the official 0xFA + standby path by
+       default. Modes 1/2 (HOME) are never used here. -->
+  <arg name="leader_master_restore_linkage_activation" default="false" />
+  <arg name="leader_role_settle_s" default="0.25" />
+  <!-- Legacy standalone trajectory-teach timing. Supervised T does not use
+       0x150; it switches the leader/follower role with 0xFA/0xFC below. -->
+  <arg name="leader_drag_teach_timeout_s" default="2.0" />
+  <arg name="leader_drag_teach_status_grace_s" default="0.5" />
+  <!-- Preload and briefly hold the measured OUTPUT pose, then issue 0xFA.
+       Current hardware emits the teaching stream only from this state. The
+       SDK-minimal disabled-output sequence remains a final fallback. -->
+  <arg name="leader_master_prepare_hold_s" default="0.10" />
+  <arg name="leader_master_enable_fallback" default="true" />
+  <!-- A role is accepted only when complete joint+gripper streams remain fresh
+       for this interval. One timestamp change is not a valid role proof. -->
+  <arg name="leader_role_stream_stable_s" default="0.25" />
+  <arg name="leader_role_stream_min_hz" default="10.0" />
+  <arg name="leader_role_stream_freshness_s" default="0.15" />
+  <arg name="leader_role_config_retries" default="2" />
+  <!-- Firmware v1.8-5 through v1.8-8 Leader-to-Follower workaround documented by
+       AgileX: repeat MOVE J at the measured current pose after 0xFC. -->
+  <arg name="leader_follower_restore_movej_repeats" default="20" />
+  <arg name="leader_follower_restore_movej_period_s" default="0.02" />
+  <arg name="leader_startup_role_timeout_s" default="1.5" />
+  <!-- Reject a role transition if 0x2Ax and 0x15x disagree about the same
+       physical J1..J6/gripper pose. This validates identity/order mapping. -->
+  <arg name="leader_role_pose_tolerance_rad" default="0.08" />
+  <arg name="leader_role_gripper_tolerance_m" default="0.015" />
+  <arg name="leader_role_pose_hard_tolerance_rad" default="0.20" />
+  <arg name="leader_role_gripper_hard_tolerance_m" default="0.030" />
+  <arg name="takeover_joint_tolerance_rad" default="0.04" />
+  <arg name="takeover_gripper_tolerance_m" default="0.005" />
+  <arg name="takeover_stable_samples" default="20" />
+  <arg name="takeover_alignment_timeout_s" default="1.0" />
+  <!-- Solo-operator grace period: followers freeze immediately on T, while
+       leaders remain position-held until this delay expires. -->
+  <arg name="takeover_release_delay_s" default="1.0" />
+  <!-- Require OpenPI command publication to remain quiet after HOLD before
+       changing leader roles. Delayed policy frames are ignored regardless. -->
+  <arg name="takeover_policy_quiet_s" default="0.20" />
+  <!-- OpenPI must explicitly ACK that its publisher/action queue stopped. -->
+  <arg name="takeover_policy_ack_timeout_s" default="2.0" />
+  <!-- Both leader drivers ACK their send barriers before this final
+       SocketCAN drain interval starts. -->
+  <arg name="takeover_leader_tx_quiet_s" default="0.20" />
+  <!-- Covers one fast seamless attempt plus one full 0xFA+standby protocol
+       activation and both independent leader CAN streams. -->
+  <arg name="takeover_role_timeout_s" default="15.0" />
+  <!-- Legacy COLLECT requests may still use OUTPUT-to-MASTER. The production
+       fixed collection launch does not include this driver or runtime switch. -->
+  <arg name="collect_role_timeout_s" default="30.0" />
+  <!-- Covers both configured 0xFC retries plus physical alignment time. -->
+  <arg name="inference_start_timeout_s" default="15.0" />
+  <arg name="home_timeout_s" default="15.0" />
+  <arg name="home_stable_samples" default="20" />
+  <arg name="home_max_joint_velocity_rad_s" default="0.25" />
+  <arg name="home_max_gripper_velocity_m_s" default="0.03" />
+  <!-- HOME release: open follower grippers to this width (m) for
+       home_release_s before moving HOME, close at HOME. 0 disables it. -->
+  <arg name="home_release_gripper_m" default="0.0" />
+  <arg name="home_release_s" default="1.5" />
+
+  <!-- Supervised profile: leaders use 0xFC for IDLE/INFERENCE/HOME. T changes
+       to 0xFA zero-force MASTER without disabling the leaders; the mux then
+       redirects their 0x155-0x159 stream to the two follower topics. -->
+  <node name="piper_master_left_driver" pkg="piper"
+        type="piper_leader_mode_driver.py" output="screen" required="true">
+    <param name="can_port" value="$(arg master_left_can)" />
+    <param name="auto_enable" value="$(arg auto_enable)" />
+    <param name="publish_hz" value="$(arg publish_hz)" />
+    <param name="role_timeout_s" value="$(arg leader_role_timeout_s)" />
+    <param name="role_settle_s" value="$(arg leader_role_settle_s)" />
+    <param name="drag_teach_timeout_s"
+           value="$(arg leader_drag_teach_timeout_s)" />
+    <param name="drag_teach_status_grace_s"
+           value="$(arg leader_drag_teach_status_grace_s)" />
+    <param name="master_prepare_hold_s"
+           value="$(arg leader_master_prepare_hold_s)" />
+    <param name="master_enable_fallback"
+           value="$(arg leader_master_enable_fallback)" />
+    <param name="role_stream_stable_s"
+           value="$(arg leader_role_stream_stable_s)" />
+    <param name="role_stream_min_hz"
+           value="$(arg leader_role_stream_min_hz)" />
+    <param name="role_stream_freshness_s"
+           value="$(arg leader_role_stream_freshness_s)" />
+    <param name="master_first_no_stream_retry_s"
+           value="$(arg leader_master_first_no_stream_retry_s)" />
+    <param name="master_standby_activation"
+           value="$(arg leader_master_standby_activation)" />
+    <param name="master_restore_linkage_activation"
+           value="$(arg leader_master_restore_linkage_activation)" />
+    <param name="role_config_retries" value="$(arg leader_role_config_retries)" />
+    <param name="follower_restore_movej_repeats"
+           value="$(arg leader_follower_restore_movej_repeats)" />
+    <param name="follower_restore_movej_period_s"
+           value="$(arg leader_follower_restore_movej_period_s)" />
+    <param name="startup_role_timeout_s"
+           value="$(arg leader_startup_role_timeout_s)" />
+    <param name="enable_timeout_s" value="$(arg enable_timeout_s)" />
+    <param name="enable_retry_period_s" value="$(arg enable_retry_period_s)" />
+    <param name="role_pose_tolerance_rad"
+           value="$(arg leader_role_pose_tolerance_rad)" />
+    <param name="role_gripper_tolerance_m"
+           value="$(arg leader_role_gripper_tolerance_m)" />
+    <param name="role_pose_hard_tolerance_rad"
+           value="$(arg leader_role_pose_hard_tolerance_rad)" />
+    <param name="role_gripper_hard_tolerance_m"
+           value="$(arg leader_role_gripper_hard_tolerance_m)" />
+    <param name="max_joint_velocity_rad_s"
+           value="$(arg leader_max_joint_velocity_rad_s)" />
+    <param name="max_gripper_velocity_m_s"
+           value="$(arg leader_max_gripper_velocity_m_s)" />
+    <param name="max_joint_acceleration_rad_s2"
+           value="$(arg leader_max_joint_acceleration_rad_s2)" />
+    <param name="max_gripper_acceleration_m_s2"
+           value="$(arg leader_max_gripper_acceleration_m_s2)" />
+    <param name="alignment_max_joint_velocity_rad_s"
+           value="$(arg leader_alignment_max_joint_velocity_rad_s)" />
+    <param name="alignment_max_gripper_velocity_m_s"
+           value="$(arg leader_alignment_max_gripper_velocity_m_s)" />
+    <param name="alignment_max_joint_acceleration_rad_s2"
+           value="$(arg leader_alignment_max_joint_acceleration_rad_s2)" />
+    <param name="alignment_max_gripper_acceleration_m_s2"
+           value="$(arg leader_alignment_max_gripper_acceleration_m_s2)" />
+    <param name="home_max_joint_velocity_rad_s"
+           value="$(arg home_max_joint_velocity_rad_s)" />
+    <param name="home_max_gripper_velocity_m_s"
+           value="$(arg home_max_gripper_velocity_m_s)" />
+    <remap from="/leader/joint_states" to="/teleop/leader/joint_left" />
+    <remap from="/leader/joint_command" to="/teleop/leader_command/joint_left" />
+    <remap from="/leader/control_state" to="/teleop/leader/control_state_left" />
+    <remap from="/leader/tx_quiet" to="/teleop/leader/tx_quiet_left" />
+  </node>
+
+  <node name="piper_master_right_driver" pkg="piper"
+        type="piper_leader_mode_driver.py" output="screen" required="true">
+    <param name="can_port" value="$(arg master_right_can)" />
+    <param name="auto_enable" value="$(arg auto_enable)" />
+    <param name="publish_hz" value="$(arg publish_hz)" />
+    <param name="role_timeout_s" value="$(arg leader_role_timeout_s)" />
+    <param name="role_settle_s" value="$(arg leader_role_settle_s)" />
+    <param name="drag_teach_timeout_s"
+           value="$(arg leader_drag_teach_timeout_s)" />
+    <param name="drag_teach_status_grace_s"
+           value="$(arg leader_drag_teach_status_grace_s)" />
+    <param name="master_prepare_hold_s"
+           value="$(arg leader_master_prepare_hold_s)" />
+    <param name="master_enable_fallback"
+           value="$(arg leader_master_enable_fallback)" />
+    <param name="role_stream_stable_s"
+           value="$(arg leader_role_stream_stable_s)" />
+    <param name="role_stream_min_hz"
+           value="$(arg leader_role_stream_min_hz)" />
+    <param name="role_stream_freshness_s"
+           value="$(arg leader_role_stream_freshness_s)" />
+    <param name="master_first_no_stream_retry_s"
+           value="$(arg leader_master_first_no_stream_retry_s)" />
+    <param name="master_standby_activation"
+           value="$(arg leader_master_standby_activation)" />
+    <param name="master_restore_linkage_activation"
+           value="$(arg leader_master_restore_linkage_activation)" />
+    <param name="role_config_retries" value="$(arg leader_role_config_retries)" />
+    <param name="follower_restore_movej_repeats"
+           value="$(arg leader_follower_restore_movej_repeats)" />
+    <param name="follower_restore_movej_period_s"
+           value="$(arg leader_follower_restore_movej_period_s)" />
+    <param name="startup_role_timeout_s"
+           value="$(arg leader_startup_role_timeout_s)" />
+    <param name="enable_timeout_s" value="$(arg enable_timeout_s)" />
+    <param name="enable_retry_period_s" value="$(arg enable_retry_period_s)" />
+    <param name="role_pose_tolerance_rad"
+           value="$(arg leader_role_pose_tolerance_rad)" />
+    <param name="role_gripper_tolerance_m"
+           value="$(arg leader_role_gripper_tolerance_m)" />
+    <param name="role_pose_hard_tolerance_rad"
+           value="$(arg leader_role_pose_hard_tolerance_rad)" />
+    <param name="role_gripper_hard_tolerance_m"
+           value="$(arg leader_role_gripper_hard_tolerance_m)" />
+    <param name="max_joint_velocity_rad_s"
+           value="$(arg leader_max_joint_velocity_rad_s)" />
+    <param name="max_gripper_velocity_m_s"
+           value="$(arg leader_max_gripper_velocity_m_s)" />
+    <param name="max_joint_acceleration_rad_s2"
+           value="$(arg leader_max_joint_acceleration_rad_s2)" />
+    <param name="max_gripper_acceleration_m_s2"
+           value="$(arg leader_max_gripper_acceleration_m_s2)" />
+    <param name="alignment_max_joint_velocity_rad_s"
+           value="$(arg leader_alignment_max_joint_velocity_rad_s)" />
+    <param name="alignment_max_gripper_velocity_m_s"
+           value="$(arg leader_alignment_max_gripper_velocity_m_s)" />
+    <param name="alignment_max_joint_acceleration_rad_s2"
+           value="$(arg leader_alignment_max_joint_acceleration_rad_s2)" />
+    <param name="alignment_max_gripper_acceleration_m_s2"
+           value="$(arg leader_alignment_max_gripper_acceleration_m_s2)" />
+    <param name="home_max_joint_velocity_rad_s"
+           value="$(arg home_max_joint_velocity_rad_s)" />
+    <param name="home_max_gripper_velocity_m_s"
+           value="$(arg home_max_gripper_velocity_m_s)" />
+    <remap from="/leader/joint_states" to="/teleop/leader/joint_right" />
+    <remap from="/leader/joint_command" to="/teleop/leader_command/joint_right" />
+    <remap from="/leader/control_state" to="/teleop/leader/control_state_right" />
+    <remap from="/leader/tx_quiet" to="/teleop/leader/tx_quiet_right" />
+  </node>
+
+  <!-- Each follower owns only its own CAN interface and receives commands
+       exclusively from the mux output. -->
+  <node name="piper_puppet_left_driver" pkg="piper"
+        type="piper_start_slave_node.py" output="screen" required="true">
+    <param name="can_port" value="$(arg puppet_left_can)" />
+    <param name="mode" value="1" />
+    <param name="auto_enable" value="$(arg auto_enable)" />
+    <param name="log_joint_commands" value="$(arg log_joint_commands)" />
+    <param name="log_joint_commands_period_s"
+           value="$(arg log_joint_commands_period_s)" />
+    <param name="sdk_piper_init" value="$(arg sdk_piper_init)" />
+    <param name="enable_timeout_s" value="$(arg enable_timeout_s)" />
+    <param name="enable_retry_period_s" value="$(arg enable_retry_period_s)" />
+    <param name="feedback_seed_timeout_s"
+           value="$(arg follower_feedback_seed_timeout_s)" />
+    <remap from="/master/joint_states" to="/teleop/command/joint_left" />
+    <remap from="/puppet/joint_states" to="/puppet/joint_left" />
+    <remap from="/puppet/arm_status" to="/puppet/arm_status_left" />
+    <remap from="/puppet/end_pose" to="/puppet/end_pose_left" />
+    <remap from="/pos_cmd" to="/teleop/unused/pos_cmd_left" />
+  </node>
+
+  <node name="piper_puppet_right_driver" pkg="piper"
+        type="piper_start_slave_node.py" output="screen" required="true">
+    <param name="can_port" value="$(arg puppet_right_can)" />
+    <param name="mode" value="1" />
+    <param name="auto_enable" value="$(arg auto_enable)" />
+    <param name="log_joint_commands" value="$(arg log_joint_commands)" />
+    <param name="log_joint_commands_period_s"
+           value="$(arg log_joint_commands_period_s)" />
+    <param name="sdk_piper_init" value="$(arg sdk_piper_init)" />
+    <param name="enable_timeout_s" value="$(arg enable_timeout_s)" />
+    <param name="enable_retry_period_s" value="$(arg enable_retry_period_s)" />
+    <param name="feedback_seed_timeout_s"
+           value="$(arg follower_feedback_seed_timeout_s)" />
+    <remap from="/master/joint_states" to="/teleop/command/joint_right" />
+    <remap from="/puppet/joint_states" to="/puppet/joint_right" />
+    <remap from="/puppet/arm_status" to="/puppet/arm_status_right" />
+    <remap from="/puppet/end_pose" to="/puppet/end_pose_right" />
+    <remap from="/pos_cmd" to="/teleop/unused/pos_cmd_right" />
+  </node>
+
+  <node name="piper_four_state_mux" pkg="piper"
+        type="piper_four_state_mux.py" output="screen" required="true">
+    <param name="publish_hz" value="$(arg publish_hz)" />
+    <param name="auto_start_inference" value="$(arg auto_start_inference)" />
+    <param name="auto_start_collect" value="$(arg auto_start_collect)" />
+    <param name="session_profile" value="$(arg session_profile)" />
+    <param name="input_timeout_s" value="$(arg input_timeout_s)" />
+    <param name="policy_input_timeout_s" value="$(arg policy_input_timeout_s)" />
+    <param name="max_joint_velocity_rad_s"
+           value="$(arg max_joint_velocity_rad_s)" />
+    <param name="max_gripper_velocity_m_s"
+           value="$(arg max_gripper_velocity_m_s)" />
+    <param name="enforce_position_limits"
+           value="$(arg enforce_position_limits)" />
+    <param name="takeover_joint_tolerance_rad"
+           value="$(arg takeover_joint_tolerance_rad)" />
+    <param name="takeover_gripper_tolerance_m"
+           value="$(arg takeover_gripper_tolerance_m)" />
+    <param name="takeover_stable_samples"
+           value="$(arg takeover_stable_samples)" />
+    <param name="takeover_alignment_timeout_s"
+           value="$(arg takeover_alignment_timeout_s)" />
+    <param name="takeover_release_delay_s"
+           value="$(arg takeover_release_delay_s)" />
+    <param name="takeover_policy_quiet_s"
+           value="$(arg takeover_policy_quiet_s)" />
+    <param name="takeover_policy_ack_timeout_s"
+           value="$(arg takeover_policy_ack_timeout_s)" />
+    <param name="takeover_leader_tx_quiet_s"
+           value="$(arg takeover_leader_tx_quiet_s)" />
+    <param name="takeover_role_timeout_s"
+           value="$(arg takeover_role_timeout_s)" />
+    <param name="collect_role_timeout_s"
+           value="$(arg collect_role_timeout_s)" />
+    <param name="inference_start_timeout_s"
+           value="$(arg inference_start_timeout_s)" />
+    <param name="home_timeout_s" value="$(arg home_timeout_s)" />
+    <param name="home_release_gripper_m" value="$(arg home_release_gripper_m)" />
+    <param name="home_release_s" value="$(arg home_release_s)" />
+    <param name="home_stable_samples" value="$(arg home_stable_samples)" />
+    <param name="home_max_joint_velocity_rad_s"
+           value="$(arg home_max_joint_velocity_rad_s)" />
+    <param name="home_max_gripper_velocity_m_s"
+           value="$(arg home_max_gripper_velocity_m_s)" />
+    <param name="supervised_start_joint_tolerance_rad"
+           value="$(arg supervised_start_joint_tolerance_rad)" />
+    <param name="supervised_start_gripper_tolerance_m"
+           value="$(arg supervised_start_gripper_tolerance_m)" />
+  </node>
+</launch>

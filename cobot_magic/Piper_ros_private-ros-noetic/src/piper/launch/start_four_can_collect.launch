@@ -1,0 +1,143 @@
+<launch>
+  <!-- Final four-independent-CAN collection profile.
+
+       Both leaders MUST already be persisted as 0xFA MASTER and power-cycled
+       before this launch starts. The fixed readers are deliberately read-only:
+       startup never enables a leader, sends 0xFA/0xFC, or holds a leader pose.
+       They auto-detect all protocol-legal 0x15x/0x16x/0x17x control offsets.
+       This removes the intermittent runtime OUTPUT-to-MASTER transition and
+       the associated lift-then-disable event. -->
+  <arg name="master_left_can" default="can_l_leader" />
+  <arg name="master_right_can" default="can_r_leader" />
+  <arg name="puppet_left_can" default="can_l_follower" />
+  <arg name="puppet_right_can" default="can_r_follower" />
+  <arg name="auto_enable" default="false" />
+  <arg name="publish_hz" default="200.0" />
+  <arg name="input_timeout_s" default="0.15" />
+  <!-- A user may need to move each leader once after this launch starts so
+       event-driven firmware emits its first complete MASTER target group. -->
+  <arg name="leader_startup_timeout_s" default="30.0" />
+  <arg name="collection_startup_timeout_s" default="10.0" />
+  <arg name="collection_recovery_stable_time_s" default="0.10" />
+
+  <!-- Slew limits are a discontinuity guard, not a speed governor: measured
+       follower capability is ~3.0 rad/s per joint and ~0.22 m/s at the
+       gripper, so a lower value only adds lag the hardware did not ask for.
+       The tracking-lag bounds stop the limiter from integrating error while
+       an operator outruns the arm. queue_size=1 and TCP_NODELAY are used
+       throughout the data path to avoid accumulating old commands. -->
+  <arg name="max_joint_velocity_rad_s" default="3.0" />
+  <arg name="max_gripper_velocity_m_s" default="0.8" />
+  <arg name="max_joint_tracking_lag_rad" default="0.10" />
+  <arg name="max_gripper_tracking_lag_m" default="0.01" />
+
+  <arg name="sdk_piper_init" default="false" />
+  <arg name="enable_timeout_s" default="5.0" />
+  <arg name="enable_retry_period_s" default="0.1" />
+  <arg name="collection_enable_retry_backoff_s" default="1.0" />
+  <arg name="collection_enable_status_poll_s" default="0.10" />
+  <arg name="collection_enable_loss_grace_s" default="0.50" />
+  <arg name="follower_feedback_seed_timeout_s" default="2.0" />
+  <arg name="log_joint_commands" default="false" />
+  <arg name="log_joint_commands_period_s" default="1.0" />
+
+  <node name="piper_fixed_master_left_reader" pkg="piper"
+        type="piper_fixed_master_reader.py" output="screen" required="true">
+    <param name="can_port" value="$(arg master_left_can)" />
+    <param name="publish_hz" value="$(arg publish_hz)" />
+    <param name="startup_timeout_s" value="$(arg leader_startup_timeout_s)" />
+    <param name="stream_timeout_s" value="$(arg input_timeout_s)" />
+    <remap from="/master/joint_states" to="/teleop/leader/joint_left" />
+    <remap from="/master/control_state"
+           to="/teleop/leader/control_state_left" />
+  </node>
+
+  <node name="piper_fixed_master_right_reader" pkg="piper"
+        type="piper_fixed_master_reader.py" output="screen" required="true">
+    <param name="can_port" value="$(arg master_right_can)" />
+    <param name="publish_hz" value="$(arg publish_hz)" />
+    <param name="startup_timeout_s" value="$(arg leader_startup_timeout_s)" />
+    <param name="stream_timeout_s" value="$(arg input_timeout_s)" />
+    <remap from="/master/joint_states" to="/teleop/leader/joint_right" />
+    <remap from="/master/control_state"
+           to="/teleop/leader/control_state_right" />
+  </node>
+
+  <!-- Followers remain standard OUTPUT arms and accept commands only from
+       piper_fixed_collect_mux. Explicit /enable_flag=true is required. -->
+  <node name="piper_collect_puppet_left_driver" pkg="piper"
+        type="piper_collect_slave_node.py" output="screen" required="true">
+    <param name="can_port" value="$(arg puppet_left_can)" />
+    <param name="mode" value="1" />
+    <param name="auto_enable" value="$(arg auto_enable)" />
+    <param name="sdk_piper_init" value="$(arg sdk_piper_init)" />
+    <param name="enable_timeout_s" value="$(arg enable_timeout_s)" />
+    <param name="enable_retry_period_s" value="$(arg enable_retry_period_s)" />
+    <param name="collection_enable_retry_backoff_s"
+           value="$(arg collection_enable_retry_backoff_s)" />
+    <param name="collection_enable_status_poll_s"
+           value="$(arg collection_enable_status_poll_s)" />
+    <param name="collection_enable_loss_grace_s"
+           value="$(arg collection_enable_loss_grace_s)" />
+    <param name="feedback_seed_timeout_s"
+           value="$(arg follower_feedback_seed_timeout_s)" />
+    <param name="log_joint_commands" value="$(arg log_joint_commands)" />
+    <param name="log_joint_commands_period_s"
+           value="$(arg log_joint_commands_period_s)" />
+    <remap from="/master/joint_states" to="/teleop/command/joint_left" />
+    <remap from="/puppet/joint_states" to="/puppet/joint_left" />
+    <remap from="/puppet/arm_status" to="/puppet/arm_status_left" />
+    <remap from="/puppet/end_pose" to="/puppet/end_pose_left" />
+    <remap from="/pos_cmd" to="/teleop/unused/pos_cmd_left" />
+    <remap from="/enable_flag" to="/teleop/follower_enable_request" />
+    <remap from="/teleop/follower_enabled"
+           to="/teleop/follower_enabled_left" />
+  </node>
+
+  <node name="piper_collect_puppet_right_driver" pkg="piper"
+        type="piper_collect_slave_node.py" output="screen" required="true">
+    <param name="can_port" value="$(arg puppet_right_can)" />
+    <param name="mode" value="1" />
+    <param name="auto_enable" value="$(arg auto_enable)" />
+    <param name="sdk_piper_init" value="$(arg sdk_piper_init)" />
+    <param name="enable_timeout_s" value="$(arg enable_timeout_s)" />
+    <param name="enable_retry_period_s" value="$(arg enable_retry_period_s)" />
+    <param name="collection_enable_retry_backoff_s"
+           value="$(arg collection_enable_retry_backoff_s)" />
+    <param name="collection_enable_status_poll_s"
+           value="$(arg collection_enable_status_poll_s)" />
+    <param name="collection_enable_loss_grace_s"
+           value="$(arg collection_enable_loss_grace_s)" />
+    <param name="feedback_seed_timeout_s"
+           value="$(arg follower_feedback_seed_timeout_s)" />
+    <param name="log_joint_commands" value="$(arg log_joint_commands)" />
+    <param name="log_joint_commands_period_s"
+           value="$(arg log_joint_commands_period_s)" />
+    <remap from="/master/joint_states" to="/teleop/command/joint_right" />
+    <remap from="/puppet/joint_states" to="/puppet/joint_right" />
+    <remap from="/puppet/arm_status" to="/puppet/arm_status_right" />
+    <remap from="/puppet/end_pose" to="/puppet/end_pose_right" />
+    <remap from="/pos_cmd" to="/teleop/unused/pos_cmd_right" />
+    <remap from="/enable_flag" to="/teleop/follower_enable_request" />
+    <remap from="/teleop/follower_enabled"
+           to="/teleop/follower_enabled_right" />
+  </node>
+
+  <node name="piper_fixed_collect_mux" pkg="piper"
+        type="piper_fixed_collect_mux.py" output="screen" required="true">
+    <param name="publish_hz" value="$(arg publish_hz)" />
+    <param name="input_timeout_s" value="$(arg input_timeout_s)" />
+    <param name="startup_timeout_s"
+           value="$(arg collection_startup_timeout_s)" />
+    <param name="recovery_stable_time_s"
+           value="$(arg collection_recovery_stable_time_s)" />
+    <param name="max_joint_velocity_rad_s"
+           value="$(arg max_joint_velocity_rad_s)" />
+    <param name="max_gripper_velocity_m_s"
+           value="$(arg max_gripper_velocity_m_s)" />
+    <param name="max_joint_tracking_lag_rad"
+           value="$(arg max_joint_tracking_lag_rad)" />
+    <param name="max_gripper_tracking_lag_m"
+           value="$(arg max_gripper_tracking_lag_m)" />
+  </node>
+</launch>

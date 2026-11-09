@@ -1,0 +1,60 @@
+defaults:
+  - model/recap_value_model@advantage.model
+  - _self_
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+  searchpath:
+    - file://${oc.env:REPO_PATH}/examples/offline_rl/config/
+  job:
+    chdir: false
+
+advantage:
+  value_checkpoint: ${oc.env:RECAP_VALUE_CHECKPOINT}
+  batch_size: 2
+  num_dataloader_workers_per_gpu: 0
+  prefetch_factor: 2
+  flush_interval: 32
+  discount_next_value: true
+  tag: piper_recap_adv_v1
+  returns_tag: piper_recap_v1
+  # pi*0.6 fine-tuning: threshold such that ~40% of the robot rollouts are
+  # positive, set on rollout frames only (demonstrations are all positive and
+  # would otherwise move the threshold). round_001: 0.3 over all frames incl.
+  # demos, which left 48% of rollout frames positive.
+  positive_quantile: 0.4
+  threshold_dataset_types: [rollout]
+  # RECAP (pi*0.6 IV-B, V-D): "force I_t = True for all corrections", i.e. every
+  # human-controlled frame is positive regardless of threshold or outcome.
+  # intervention_success_only: true is the Evo-RL variant (successful episodes only).
+  force_intervention_positive: true
+  intervention_success_only: false
+  # Centred moving average of V(o_t) inside each episode before the N-step
+  # difference, in seconds (frames = seconds x dataset fps; 0 disables).
+  # round_001 offline check (62 rollouts): adjacent-frame label flips 28% -> 3%,
+  # success/failure positive-rate gap +6.4 -> +13.7 points together with N=50.
+  value_smoothing_s: 1.0
+  model:
+    siglip_path: ${oc.env:RECAP_SIGLIP_DIR}
+    gemma3_path: ${oc.env:RECAP_GEMMA_DIR}
+    tokenizer_path: ${oc.env:RECAP_GEMMA_DIR}
+    critic_expert_variant: gemma_1m
+data:
+  robot_type: piper
+  model_type: pi05
+  train_data_paths:
+    - dataset_path: ${oc.env:RECAP_DATASET}
+      type: rollout
+      weight: 1.0
+      robot_type: piper
+  # N in dataset frames = the policy's 50-step action chunk that the
+  # "Advantage: positive" condition applies to (pi*0.6: N = H = 50).
+  # 3.3 s on 15 fps rollouts, 1.67 s on 30 fps demonstrations.
+  advantage_lookahead_step: 50
+  gamma: 1.0
+distributed:
+  enabled: false
+  backend: nccl
+  timeout: 3600

@@ -1,0 +1,9 @@
+This repository combines code under different licenses:
+
+- openpi/                     fork of Physical-Intelligence/openpi, Apache-2.0 (openpi/LICENSE, Gemma terms in openpi/LICENSE_GEMMA.txt)
+- openpi/RLinf/               fork of RLinf/RLinf, Apache-2.0 (openpi/RLinf/LICENSE)
+- openpi/third_party/lerobot/ huggingface/lerobot 0.1.0, Apache-2.0 (openpi/third_party/lerobot/LICENSE)
+- cobot_magic/Piper_ros_private-ros-noetic/  AgileX Piper ROS driver with four-CAN changes, MIT (see its LICENSE)
+- cobot_magic/camera_ws/src/ros_astra_camera/ orbbec/ros_astra_camera, see its package license
+- cobot_magic/collect_data/, cobot_magic/tools/ Cobot Magic (AgileX) distribution, modified
+- cobot_magic/lingbot_piper/  follower-only mux derived from the Piper ROS driver above

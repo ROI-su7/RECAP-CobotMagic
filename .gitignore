@@ -1,0 +1,26 @@
+# Environments, weights, data and run outputs are never committed.
+.venv/
+.venv-*/
+__pycache__/
+*.py[cod]
+*.egg-info/
+openpi/checkpoints/
+openpi/lerobot_data
+openpi/assets/
+logs/
+wandb/
+recap_data/
+recap_runs/
+recap_artifacts/
+*.pt
+*.pth
+*.safetensors
+*.ckpt
+*.hdf5
+*.mp4
+# catkin
+cobot_magic/**/build/
+cobot_magic/**/devel/
+cobot_magic/**/install/
+cobot_magic/*/.catkin_workspace
+cobot_magic/*/src/CMakeLists.txt

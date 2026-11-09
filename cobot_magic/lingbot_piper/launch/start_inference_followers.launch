@@ -1,0 +1,81 @@
+<launch>
+  <!-- LingBot copy of piper/launch/start_inference_followers.launch. Drivers
+       are unchanged; the mux is lingbot_piper's (powered HOLD on feedback gaps). -->
+  <arg name="puppet_left_can" default="can_l_follower" />
+  <arg name="puppet_right_can" default="can_r_follower" />
+  <arg name="publish_hz" default="200.0" />
+  <!-- Opt-in Stage-2 I/B/C/X keyboard protocol; ordinary OpenPI is unchanged. -->
+  <arg name="rlt_stage2" default="false" />
+  <arg name="input_timeout_s" default="0.15" />
+  <arg name="policy_input_timeout_s" default="1.0" />
+  <!-- After this interval the mux reports exactly which input streams are
+       missing, but it keeps waiting with both followers disabled. -->
+  <arg name="startup_timeout_s" default="10.0" />
+  <arg name="max_joint_velocity_rad_s" default="1.5" />
+  <arg name="max_gripper_velocity_m_s" default="0.15" />
+  <arg name="home_max_joint_velocity_rad_s" default="0.25" />
+  <arg name="home_max_gripper_velocity_m_s" default="0.03" />
+  <arg name="home_pause_timeout_s" default="1.0" />
+  <!-- Extra grip squeeze for clients that send raw predicted openings (Pi05:
+       0.008). Keep 0 for LingBot, whose client squeezes itself. -->
+  <arg name="gripper_squeeze_margin_m" default="0.0" />
+  <arg name="sdk_piper_init" default="false" />
+  <arg name="enable_timeout_s" default="5.0" />
+  <arg name="enable_retry_period_s" default="0.1" />
+  <arg name="log_joint_commands" default="false" />
+
+  <node name="piper_inference_left_follower" pkg="piper"
+        type="piper_start_slave_node.py" output="screen" required="true">
+    <param name="can_port" value="$(arg puppet_left_can)" />
+    <param name="mode" value="1" />
+    <!-- Public /enable_flag arms the mux. Only the mux may forward the gated
+         follower enable after policy and feedback are both fresh. -->
+    <param name="auto_enable" value="false" />
+    <param name="sdk_piper_init" value="$(arg sdk_piper_init)" />
+    <param name="enable_timeout_s" value="$(arg enable_timeout_s)" />
+    <param name="enable_retry_period_s" value="$(arg enable_retry_period_s)" />
+    <param name="log_joint_commands" value="$(arg log_joint_commands)" />
+    <remap from="/master/joint_states" to="/teleop/command/joint_left" />
+    <remap from="/puppet/joint_states" to="/puppet/joint_left" />
+    <remap from="/puppet/arm_status" to="/puppet/arm_status_left" />
+    <remap from="/puppet/end_pose" to="/puppet/end_pose_left" />
+    <remap from="/pos_cmd" to="/teleop/unused/pos_cmd_left" />
+    <remap from="/enable_flag" to="/teleop/follower_enable" />
+  </node>
+
+  <node name="piper_inference_right_follower" pkg="piper"
+        type="piper_start_slave_node.py" output="screen" required="true">
+    <param name="can_port" value="$(arg puppet_right_can)" />
+    <param name="mode" value="1" />
+    <param name="auto_enable" value="false" />
+    <param name="sdk_piper_init" value="$(arg sdk_piper_init)" />
+    <param name="enable_timeout_s" value="$(arg enable_timeout_s)" />
+    <param name="enable_retry_period_s" value="$(arg enable_retry_period_s)" />
+    <param name="log_joint_commands" value="$(arg log_joint_commands)" />
+    <remap from="/master/joint_states" to="/teleop/command/joint_right" />
+    <remap from="/puppet/joint_states" to="/puppet/joint_right" />
+    <remap from="/puppet/arm_status" to="/puppet/arm_status_right" />
+    <remap from="/puppet/end_pose" to="/puppet/end_pose_right" />
+    <remap from="/pos_cmd" to="/teleop/unused/pos_cmd_right" />
+    <remap from="/enable_flag" to="/teleop/follower_enable" />
+  </node>
+
+  <node name="piper_policy_follower_mux" pkg="lingbot_piper"
+        type="piper_policy_follower_mux.py" output="screen" required="true">
+    <param name="rlt_stage2" value="$(arg rlt_stage2)" />
+    <param name="publish_hz" value="$(arg publish_hz)" />
+    <param name="input_timeout_s" value="$(arg input_timeout_s)" />
+    <param name="policy_input_timeout_s" value="$(arg policy_input_timeout_s)" />
+    <param name="startup_timeout_s" value="$(arg startup_timeout_s)" />
+    <param name="max_joint_velocity_rad_s"
+           value="$(arg max_joint_velocity_rad_s)" />
+    <param name="max_gripper_velocity_m_s"
+           value="$(arg max_gripper_velocity_m_s)" />
+    <param name="home_max_joint_velocity_rad_s"
+           value="$(arg home_max_joint_velocity_rad_s)" />
+    <param name="home_max_gripper_velocity_m_s"
+           value="$(arg home_max_gripper_velocity_m_s)" />
+    <param name="home_pause_timeout_s" value="$(arg home_pause_timeout_s)" />
+    <param name="gripper_squeeze_margin_m" value="$(arg gripper_squeeze_margin_m)" />
+  </node>
+</launch>

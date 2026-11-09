@@ -1,0 +1,14 @@
+.git/
+.venv*/
+logs/
+outputs/
+backups/
+checkpoints/
+recap_data/
+recap_artifacts/
+recap_runs/
+__pycache__/
+*.pyc
+HOLD
+.pytest_cache/
+.ruff_cache/

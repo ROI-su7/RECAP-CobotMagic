@@ -1,0 +1,35 @@
+<launch>
+  <!-- Supervised inference profile: four arms follow policy and T can take over. -->
+  <arg name="master_left_can" default="can_l_leader" />
+  <arg name="master_right_can" default="can_r_leader" />
+  <arg name="puppet_left_can" default="can_l_follower" />
+  <arg name="puppet_right_can" default="can_r_follower" />
+  <arg name="publish_hz" default="200.0" />
+  <!-- Refuse to energize a leader whose launch-time pose is too far from its
+       follower. Use the collection profile to pre-align instead. -->
+  <arg name="supervised_start_joint_tolerance_rad" default="0.08" />
+  <arg name="supervised_start_gripper_tolerance_m" default="0.015" />
+  <!-- H releases a held object: open follower grippers, return HOME open,
+       then close. Set home_release_gripper_m:=0 for the original HOME. -->
+  <arg name="home_release_gripper_m" default="0.06" />
+  <arg name="home_release_s" default="1.5" />
+
+  <include file="$(find piper)/launch/start_four_can_mux.launch">
+    <arg name="master_left_can" value="$(arg master_left_can)" />
+    <arg name="master_right_can" value="$(arg master_right_can)" />
+    <arg name="puppet_left_can" value="$(arg puppet_left_can)" />
+    <arg name="puppet_right_can" value="$(arg puppet_right_can)" />
+    <!-- Auto mode is intentionally paired with an explicit enable topic. -->
+    <arg name="auto_enable" value="false" />
+    <arg name="auto_start_inference" value="true" />
+    <arg name="auto_start_collect" value="false" />
+    <arg name="session_profile" value="supervised" />
+    <arg name="publish_hz" value="$(arg publish_hz)" />
+    <arg name="supervised_start_joint_tolerance_rad"
+         value="$(arg supervised_start_joint_tolerance_rad)" />
+    <arg name="supervised_start_gripper_tolerance_m"
+         value="$(arg supervised_start_gripper_tolerance_m)" />
+    <arg name="home_release_gripper_m" value="$(arg home_release_gripper_m)" />
+    <arg name="home_release_s" value="$(arg home_release_s)" />
+  </include>
+</launch>
